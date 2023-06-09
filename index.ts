@@ -1,145 +1,80 @@
-import * as os from "node:os";
-import * as fs from "node:fs";
-import * as https from "node:https";
-import * as path from "node:path";
-import * as si from 'systeminformation';
+import { Client } from 'pg';
+import { config } from "dotenv";
 
-import * as promptSync from 'prompt-sync';
+config({ path: `./.env` });
 
-const prompt = promptSync();
-
-// Task 1
-async function runSequent<T, K>(array: T[], callback: (item: T, index: number) => Promise<K>): Promise<K[]> {
-    const results: K[] = [];
-    for (let i = 0; i < array.length; i++) {
-        const result = await callback(array[i], i);
-        results.push(result);
-    }
-
-    return results;
-}
-const show = async () => {
-    const array: Array<string> = ["one", "two", "three"];
-    const results = await runSequent(array, (item, index) =>
-        Promise.resolve({
-            item,
-            index,
-        })
-    );
-    console.log(results);
-}
-
-//show()
-
-// Task 2
-const arrayChangeDelete = <T>(array: T[], rule: (item: T) => boolean): T[] => {
-    const deletedElements: T[] = [];
-
-    for (let i = array.length - 1; i >= 0; i--) {
-        if (rule(array[i]))
-            deletedElements.push(...array.splice(i, 1));
-    }
-
-    return deletedElements;
-}
-
-/*
-const array = [1, 2, 3, 6, 7, 9];
-const deletedElements = arrayChangeDelete(array, (item) => item % 2 === 0);
-console.log(array);
-console.log(deletedElements);
-
-*/
-
-// Task 3
-
-const getContent = () => {
-    const fileName: string = prompt(`Type your file name: `);
-
-    fs.readFile(fileName, `utf-8`, (err, data) => {
-        const urls = JSON.parse(data) as string[];
-        const outputDirName = path.parse(fileName).name + "_pages";
-
-        if (!fs.existsSync(outputDirName)) {
-            fs.mkdirSync(outputDirName);
-        }
-
-        urls.forEach((url, index) => {
-            const outputFileName = path.join(outputDirName, `page_${index}.html`);
-
-            https
-                .get(url, res => {
-                    const fileStream = fs.createWriteStream(outputFileName);
-                    res.pipe(fileStream);
-
-                    fileStream.on("finish", () => console.log(`Page saved to ${outputFileName}`));
-                })
-                .on(`error`, (err) => console.log(err));
-        });
-
+const main = async () => {
+    const client = new Client({
+        connectionString: process.env.DB_CONNECTION_STRING,
     });
+
+    await client.connect(async (err) => {
+        if (err)
+            throw Error(err.stack);
+    });
+
+    const mostViewedVideos = await client.query(`
+    SELECT videos.id AS video_id, videos.title AS video_title, videos.preview_url AS video_preview, videos.duration AS video_duration, videos.published_at AS video_publish_date, COUNT(likes.video_id) AS like_count
+    FROM videos
+    JOIN likes ON videos.id = likes.video_id
+    WHERE likes.positive = true AND videos.published_at >= '2021-09-01'
+    GROUP BY videos.id
+    HAVING COUNT(likes.video_id) > 4
+    ORDER BY like_count DESC
+    LIMIT 10;`).rows;
+    console.log(mostViewedVideos);
+
+    /*
+    const usersWithChannels = await client.query(`
+    SELECT users.id AS user_id, users.name AS user_name, users.avatar_url AS user_avatar, channels.photo_url AS channel_photo, channels.description AS channel_description, channels.created_at AS channel_creation_date
+    FROM users
+    JOIN channels ON users.id = channels.user_id
+    ORDER BY channels.created_at DESC;
+    `).rows;
+    console.log(usersWithChannels);
+
+    const topLikedVideos = await client.query(`
+    SELECT videos.id AS video_id, videos.title AS video_title, videos.preview_url AS video_preview, videos.duration AS video_duration, videos.published_at AS video_publish_date
+    FROM videos
+    JOIN likes ON videos.id = likes.video_id
+    ORDER BY likes.positive DESC
+    LIMIT 5;
+    `).rows;
+    console.log(topLikedVideos);
+
+    const videosFromSubscription = await client.query(`
+    SELECT videos.id AS video_id, videos.title AS video_title, videos.preview_url AS video_preview, videos.duration AS video_duration, videos.published_at AS video_publish_date
+    FROM videos
+    JOIN channels ON videos.channel_id = channels.id
+    JOIN subscriptions ON channels.id = subscriptions.channel_id
+    JOIN users ON subscriptions.user_id = users.id
+    WHERE users.name = 'Stephanie Bulger'
+    ORDER BY videos.published_at DESC;
+    `).rows;
+    console.log(videosFromSubscription);
+
+    const channelVideos = await client.query('
+    SELECT channels.*, COUNT(subscriptions.user_id) AS subscriber_count
+    FROM channels
+    LEFT JOIN subscriptions ON channels.id = subscriptions.channel_id
+    WHERE channels.id = '79f6ce8f-ee0c-4ef5-9c36-da06b7f4cb76'
+    GROUP BY channels.id;').rows;
+    console.log(channelVideos);
+
+    const subscriptionsForUser = await client.query(`
+    SELECT videos.id AS video_id, videos.title AS video_title, videos.preview_url AS video_preview, videos.duration AS video_duration, videos.published_at AS video_publish_date, COUNT(likes.video_id) AS like_count
+    FROM videos
+    JOIN likes ON videos.id = likes.video_id
+    WHERE likes.positive = true AND videos.published_at >= '2021-09-01'
+    GROUP BY videos.id
+    HAVING COUNT(likes.video_id) > 4
+    ORDER BY like_count DESC
+    LIMIT 10; `).rows;
+    console.log(subscriptionsForUser);
+    */
 };
 
-// getContent();
-
-// Task 4
-
-const frequency = prompt(`Type frequency: `);
-
-setInterval(async () => {
-    const mem = await si.mem();
-    const system = await si.osInfo();
-    const graphics = await si.graphics();
-    const cpuTemperature = await si.cpuTemperature();
-    const battery = await si.battery();
-
-    console.log("Operating system:", system.distro);
-    console.log("Architecture:", os.arch());
-    console.log("Current user name:", os.userInfo().username);
-    console.log("CPU Cores Models:");
-    const cpuInfo = os.cpus();
-    cpuInfo.forEach((core) => {
-        console.log(`- ${core.model}`);
-    });
-    console.log("CPU temperature:", `${cpuTemperature.main} °C`);
-
-    console.log("Total memory:", mem.total);
-    console.log("Used memory:", mem.used);
-    console.log("Free memory:", mem.free);
-
-    console.log("Battery remaining time:", battery.timeRemaining);
-    console.log("Battery percent: ", battery.percent);
-    console.log("Battery charging: ", battery.isCharging ? "Yes" : "No");
-
-    graphics.controllers.forEach(controller =>
-        console.log(`Graphic controller: ${controller.vendor}`));
-
-}, frequency);
+main();
 
 
-// Task 5
 
-class MyEventEmitter<T> {
-    private readonly listeners: Map<string, ((args?: T) => void)[]> = new Map();
-
-    registerHandler(name: string, listener: (args?: T) => void) {
-        const listeners = this.listeners.get(name);
-        if (!listeners)
-            this.listeners.set(name, [listener]);
-        else
-            listeners.push(listener);
-    }
-
-    emitEvent(name: string, args?: T) {
-        const listeners = this.listeners.get(name);
-        if (listeners)
-            listeners.forEach(listener => listener(args));
-    }
-
-}
-
-/*
-const emitter = new MyEventEmitter();
-emitter.registerHandler('userUpdated', () => console.log('Обліковий запис користувача оновлено'));
-emitter.emitEvent('userUpdated'); // Обліковий запис користувача оновлено
- */
